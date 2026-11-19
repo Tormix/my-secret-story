@@ -155,3 +155,19 @@ vite.config.ts.timestamp-*
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs
+
+
+# Expo y compilaciones locales
+.expo/
+/dist*/
+/android/
+/ios/
+/release/
+*.apk
+*.aab
+*.keystore
+*.jks
+.openai/
+web-preview/
+.test-results/
+playwright-report/
