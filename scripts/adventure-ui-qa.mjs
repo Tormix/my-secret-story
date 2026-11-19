@@ -1,0 +1,51 @@
+import { chromium } from 'playwright';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+const log=fs.openSync('/tmp/mss-nov9-adventure-server.log','w');
+const server=spawn(process.execPath,['node_modules/expo/bin/cli','start','--web','--port','9082'],{stdio:['ignore',log,log],env:{...process.env,CI:'1'}});
+let browser;
+try {
+ for(let i=0;i<90;i++){try{if((await fetch('http://127.0.0.1:9082/status')).ok)break;}catch{}await new Promise(r=>setTimeout(r,1000));}
+ browser=await chromium.launch({executablePath:process.env.CHROME_PATH || '/workspace/chrome-qa/chrome-headless-shell-linux64/chrome-headless-shell',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+ const page=await browser.newPage({viewport:{width:412,height:915}}), errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:9082',{waitUntil:'networkidle',timeout:120000});
+ await page.getByRole('button',{name:'Tengo 18 años o más · Entrar',exact:true}).click();
+ await page.getByRole('button',{name:'Crear mi historia',exact:true}).click();
+ await page.getByRole('textbox',{name:'Tu profesión (opcional)',exact:true}).fill('Recepcionista');
+ await page.getByRole('button',{name:'Bombero',exact:true}).click();
+ await page.getByRole('button',{name:'15 capítulos',exact:true}).click();
+ await page.getByRole('button',{name:'Un secreto compartido',exact:true}).click();
+ await page.getByRole('button',{name:'Una decisión profesional',exact:true}).click();
+ await page.screenshot({path:'captures/08-adventure-profile-web.png',fullPage:true});
+ const fixture=await page.evaluate(()=>{
+ const s=JSON.parse(localStorage.getItem('storymuse.qa.v1'));
+ const memory={summary:'Alex recibió una carta',characters:['Alex, adulta de 35 años'],facts:['Vive en Valencia'],relationships:[],openThreads:['La carta'],timeline:['Lunes']};
+ const timing={startedAt:new Date().toISOString(),totalMs:1200,characters:500,model:'fixture'};
+ const generated={};for(let chapter=0;chapter<3;chapter++)generated[chapter]={title:`Capítulo de prueba ${chapter+1}`,paragraphs:Array.from({length:10},(_,i)=>`Párrafo ${i+1}: Alex examina la carta junto al parque de bomberos. Esto es contenido simulado exclusivamente para verificar la interfaz.`),summary:'La carta trae una propuesta',choices:Array.from({length:5},(_,i)=>({id:`adventure-${chapter}-${i}`,label:`Acción de prueba ${i+1}`,trust:0,courage:0})),memory,timing,lang:'es'};
+ const n={id:'qa-adventure',generationId:'qa-run',universe:'detective',source:'chatgpt',profile:{name:'Alex',gender:'woman',pronouns:'she',traits:''},intensity:'romantic',coverStyle:0,chapter:2,readingChapter:2,route:null,trust:0,courage:0,decisions:[{chapter:0,choiceId:'adventure-0-0',label:'Acción de prueba 1'},{chapter:1,choiceId:'adventure-1-0',label:'Acción de prueba 1'}],unlocked:[0,1,2],endings:[],completed:false,illustrations:{},scroll:{},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),adventure:{totalChapters:12,occupation:'Recepcionista',loveInterestName:'Daniel',loveInterestRole:'Bombero',loveInterestDescription:'Reservado',setting:'Valencia',plot:'Un secreto compartido',conflict:'Una decisión profesional',resolution:'Abierta a mis decisiones',goal:'Un nuevo comienzo',boundaries:'Sin infidelidades'},blueprint:{title:'La carta del lunes',synopsis:'Una carta cambia sus planes.',beats:Array.from({length:12},(_,i)=>({chapter:i+1,aim:'Objetivo oculto'})),memory,timing,lang:'es'},memory,generated};
+ s.novels=[n];s.wallet={credits:12,premium:false};s.settings.generationConsent=true;localStorage.setItem('storymuse.qa.v1',JSON.stringify(s));return n;
+ });
+ await page.goto('http://127.0.0.1:9082/read/qa-adventure',{waitUntil:'networkidle'});
+ await page.getByText('CAPÍTULO 3 / 12 · CHATGPT',{exact:true}).waitFor();
+ if(await page.getByRole('button',{name:/Acción de prueba/}).count()!==5)throw new Error('Expected five actions');
+ await page.getByRole('button',{name:'Acción de prueba 4',exact:true}).click();
+ await page.getByText('Has terminado los tres capítulos de prueba. Activa Premium demo gratis para continuar.',{exact:true}).waitFor();
+ const blocked=await page.evaluate(()=>JSON.parse(localStorage.getItem('storymuse.qa.v1')));
+ if(blocked.novels[0].chapter!==2 || blocked.wallet.credits!==12)throw new Error('Paywall changed chapter or charged credits');
+ await page.screenshot({path:'captures/09-trial-gate-web.png'});
+ await page.getByRole('button',{name:'Activar Premium de prueba',exact:true}).click();
+ await page.getByRole('button',{name:'Activar Premium demo · Gratis',exact:true}).click();
+ await page.goto('http://127.0.0.1:9082/read/qa-adventure',{waitUntil:'networkidle'});
+ await page.getByRole('button',{name:'Acción de prueba 4',exact:true}).click();
+ await page.getByText('CAPÍTULO 4 / 12 · CHATGPT',{exact:true}).waitFor();
+ await page.getByText('La carta del lunes',{exact:true}).last().waitFor();
+ await page.reload({waitUntil:'networkidle'});
+ await page.getByText('CAPÍTULO 4 / 12 · CHATGPT',{exact:true}).waitFor();
+ const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('storymuse.qa.v1')));
+ if(saved.novels[0].decisions.at(-1).label!=='Acción de prueba 4'||saved.novels[0].memory.summary!==fixture.memory.summary)throw new Error('Lost choice or continuity');
+ await page.screenshot({path:'captures/10-outline-saved-web.png'});
+ if(errors.length)throw new Error(errors.join('\n'));
+ fs.writeFileSync('docs/adventure-ui-qa-results.json',JSON.stringify({passed:true,surface:'React Native Web, mobile viewport; seeded story fixture, not a native device or live ChatGPT session',checks:['expanded optional profile and catalogs','12/15 chapter selector','five actions in chapter 3','three-chapter trial gate leaves state and credits unchanged','free demo Premium activation','advance to chapter 4 of 12','selected action text persisted','outline and memory survive reload'],errors},null,2));
+ console.log('Adventure UI QA passed.');
+} finally {await browser?.close();server.kill('SIGTERM');}
